@@ -14,7 +14,7 @@
 #define PERIPH_BASE 0x3f000000
 
 /////////////////////////////////////////////////////////////////////////////////////
-// GPIO
+// GPIO raw access (used for clock setup)
 /////////////////////////////////////////////////////////////////////////////////////
 #define GPIO_BASE (PERIPH_BASE + 0x200000)
 
@@ -27,6 +27,7 @@
 #define GPIO_ALT4 0b011				// GPIO Pin takes alternate function 4
 #define GPIO_ALT5 0b010				// GPIO Pin takes alternate function 5
 
+struct GpioRegisters *s_pGpioRegisters;
 struct GpioRegisters
 {
 	uint32_t GPFSEL[6];
@@ -38,9 +39,6 @@ struct GpioRegisters
 	uint32_t GPLVL[2];
 };
 
-static const int AdagioResetGpioPin = 5;	// The GPIO pin WM8770(ResetB) connected to
-static const int AdagioResetHoldPeriod = 50;	// The time (in ns) to hold ResetB low
-						// (20ns CE to ResetB hold time + 20ns ResetB to SPI Clock setup time + 10ns just in case)
 /////////////////////////////////////////////////////////////////////////////////////
 // Clocks
 /////////////////////////////////////////////////////////////////////////////////////
@@ -67,6 +65,7 @@ static const int AdagioResetHoldPeriod = 50;	// The time (in ns) to hold ResetB 
 #define CLK_DIV_DIVI(x) ((x)<<12)
 #define CLK_DIV_DIVF(x) ((x)<< 0)
 
+struct ClkRegisters *s_pClkRegisters;
 struct ClkRegisters
 {
 	uint32_t CM_GP0CTL;
@@ -104,6 +103,17 @@ static int clock_settings[4][7] = {
 	{ 96000, 40, 2826, 1, 24576000, 256, 64 }
 };
 
+
+/////////////////////////////////////////////////////////////////////////////////////
+// GPIO kernel access
+/////////////////////////////////////////////////////////////////////////////////////
+
+static const int AdagioResetHoldPeriod = 50;	// The time (in ns) to hold ResetB low
+						// (20ns CE to ResetB hold time + 20ns ResetB to SPI Clock setup time + 10ns just in case)
+
+static struct gpio_desc *gpio_hw_mute;		// Active low
+static struct gpio_desc *gpio_hw_reset;		// Active low
+
 /////////////////////////////////////////////////////////////////////////////////////
 // ALSA interfaces
 /////////////////////////////////////////////////////////////////////////////////////
@@ -139,11 +149,13 @@ static struct snd_soc_dai_link snd_adagioconnect_dai[] = {
 // Driver
 ////////////////////////////////////////
 
+static int AdagioConnect_set_bias_level(struct snd_soc_card *card, struct snd_soc_dapm_context *dapm, enum snd_soc_bias_level level);
 static struct snd_soc_card snd_rpi_adagioconnect = {
 	.name           = "snd_adagioconnect",
 	.owner          = THIS_MODULE,
 	.dai_link       = snd_adagioconnect_dai,
 	.num_links      = ARRAY_SIZE(snd_adagioconnect_dai),
+	.set_bias_level = AdagioConnect_set_bias_level,
 };
 
 static const struct of_device_id adagioconnect_dev_match[] = {

@@ -1,8 +1,9 @@
-/*      Module to connect a Raspberry PI to the soundcard from an Adagio Server System                  *
- *      Written C. Burgoyne 2018                                                                        *
- *                                                                                                      *
- *      GPIO code derived from https://sysprogs.com/VisualKernel/tutorials/raspberry/leddriver/         *
+/*      Module to connect a Raspberry PI to the soundcard from an Adagio Server System			*
+ *      Written by C. Burgoyne 2018									*
+ *													*
+ *      GPIO code derived from https://sysprogs.com/VisualKernel/tutorials/raspberry/leddriver/		*
  *	Clock code hints from http://abyz.me.uk/rpi/pigpio/examples.html (minimal_clk)			*
+ *	ALSA platform driver example sound/soc/bcm/rpi-dac.c						*
  *													*
  * 	TODO												*
  *													*
@@ -11,6 +12,7 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <asm/io.h>
 #include <linux/timer.h>
@@ -37,9 +39,8 @@ module_param(cfg_osc_stop_existing, bool, 0440);
 MODULE_PARM_DESC(cfg_osc_stop_existing, "Stops an existing GPCLK which is currently running (Dangerous, suggests it's already in use by something else).\n");
 
 /////////////////////////////////////////////////////////////////////////
-// GPIO Functions
+// Clock functions
 /////////////////////////////////////////////////////////////////////////
-struct GpioRegisters *s_pGpioRegisters;
 
 static void SetGPIOFunction(int GPIO, int functionCode)
 {
@@ -52,37 +53,6 @@ static void SetGPIOFunction(int GPIO, int functionCode)
 	printd("Changing function of GPIO%d from %x to %x\n", GPIO, (oldValue >> bit) & 0b111, functionCode);
 	s_pGpioRegisters->GPFSEL[registerIndex] = (oldValue & ~mask) | ((functionCode << bit) & mask);
 }
-
-static void SetGPIOOutputValue(int GPIO, bool outputValue)
-{
-	unsigned int registerIndex = GPIO / 32;
-	unsigned int bit = (GPIO % 32);
-
-	unsigned int curValue = s_pGpioRegisters->GPLVL[registerIndex] & (1 << bit);
-
-	unsigned int cmpValue = 0;
-	if (outputValue) cmpValue = 1;
-	cmpValue = cmpValue << bit;
-
-	if (curValue != cmpValue)
-	{
-		if (outputValue)
-		{
-			printd("GPIO%d: 0 -> 1\n", GPIO);
-			s_pGpioRegisters->GPSET[GPIO / 32] = (1 << (GPIO % 32));
-		}
-		else
-		{
-			printd("GPIO%d: 1 -> 0\n", GPIO);
-			s_pGpioRegisters->GPCLR[GPIO / 32] = (1 << (GPIO % 32));
-		}
-	}
-}
-
-/////////////////////////////////////////////////////////////////////////
-// Clock functions
-/////////////////////////////////////////////////////////////////////////
-struct ClkRegisters *s_pClkRegisters;
 
 static void StopClockSource(uint32_t* clk_reg)
 {
@@ -273,36 +243,95 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 // Basic device functions
 ////////////////////////////////////////
 
-// Pulses the GPIO pin indicated by AdagioResetGpioPin to reset the WM8770 board
-static void AdagioConnect_reset(void)
+// Enables the hardware mute
+static void AdagioConnect_hw_mute(struct snd_soc_card *card)
 {
-	printn("Resetting board.\n");
-	// Bring line low
-	SetGPIOOutputValue(AdagioResetGpioPin, false);
-	ndelay(AdagioResetHoldPeriod);			// (20ns CE to ResetB hold time + 20ns ResetB to SPI Clock setup time + 10ns just in case)
-	// Bring line back high
-	SetGPIOOutputValue(AdagioResetGpioPin, true);
+	if (gpio_hw_mute) {
+		printd("Enabling hardware mute.\n");
+		gpiod_set_value(gpio_hw_mute, 1);
+	}
+}
+
+// Disables the hardware mute
+static void AdagioConnect_hw_unmute(struct snd_soc_card *card)
+{
+	if (gpio_hw_mute) {
+		printd("Disabling hardware mute.\n");
+		gpiod_set_value(gpio_hw_mute, 0);
+	}
+}
+
+// Pulses the GPIO pin indicated in the devicetree to reset the WM8770 board
+static void AdagioConnect_hw_reset(void)
+{
+	if (gpio_hw_reset) {
+		printn("Resetting board.\n");
+		// Bring line low
+		gpiod_set_value(gpio_hw_reset, 1);
+		ndelay(AdagioResetHoldPeriod);			// (20ns CE to ResetB hold time + 20ns ResetB to SPI Clock setup time + 10ns just in case)
+		// Bring line back high
+		gpiod_set_value(gpio_hw_reset, 0);
+	}
 }
 
 static void AdagioConnect_reset_iface(void)
 {
 	// Disable MClk
-	if (cfg_osc && (s_pClkRegisters != NULL))
+	if (cfg_osc)
 	{
-		AdagioConnect_MClk_remove(AdagioMClkGpioPin);
-		iounmap(s_pClkRegisters);
+		if (s_pClkRegisters != NULL)
+		{
+			AdagioConnect_MClk_remove(AdagioMClkGpioPin);
+			iounmap(s_pClkRegisters);
+		}
+
+		if (s_pGpioRegisters != NULL)
+		{
+			// Unmap GPIO function registers
+			iounmap(s_pGpioRegisters);
+		}
 	}
 
-	// Reset GPIO pin connected to reset pin of WM8770 as input
-	SetGPIOFunction(AdagioResetGpioPin, GPIO_IN);  	//Configure the pin as input
-
-	// Unmap GPIO function registers
-	iounmap(s_pGpioRegisters);
+	gpiod_put(gpio_hw_mute);
+	gpiod_put(gpio_hw_reset);
 }
 
 ////////////////////////////////////////
 // DAI
 ////////////////////////////////////////
+
+static int AdagioConnect_set_bias_level(struct snd_soc_card *card,
+	struct snd_soc_dapm_context *dapm, enum snd_soc_bias_level level)
+{
+	struct snd_soc_pcm_runtime *rtd;
+	struct snd_soc_dai *codec_dai;
+
+	rtd = snd_soc_get_pcm_runtime(card, card->dai_link[0].name);
+	codec_dai = rtd->codec_dai;
+
+	if (dapm->dev != codec_dai->dev) return 0;
+
+	switch (level) {
+	case SND_SOC_BIAS_PREPARE:
+		if (dapm->bias_level != SND_SOC_BIAS_STANDBY) break;
+
+		/* UNMUTE AMP */
+                AdagioConnect_hw_unmute(card);
+
+		break;
+	case SND_SOC_BIAS_STANDBY:
+		if (dapm->bias_level != SND_SOC_BIAS_PREPARE) break;
+
+		/* MUTE AMP */
+		AdagioConnect_hw_mute(card);
+
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
 
 static int AdagioConnect_dai_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -379,15 +408,30 @@ static int AdagioConnect_md_probe(struct platform_device *pdev)
 	}
 
 // Initial config
-	printn("Configuring GPIOs.\n");
-	// Map GPIO function registers
-	s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
-	// Setup GPIO pin connected to reset pin of WM8770 as output
-	SetGPIOFunction(AdagioResetGpioPin, GPIO_OUT);  	//Configure the pin as output
+	gpio_hw_mute = devm_gpiod_get(&pdev->dev, "mute", GPIOD_OUT_LOW);
+	if (IS_ERR(gpio_hw_mute))
+	{
+		ret = PTR_ERR(gpio_hw_mute);
+		printe("Failed to get mute gpio: %d.\n", ret);
+		return ret;
+	}
+
+	gpio_hw_reset = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(gpio_hw_reset))
+	{
+		ret = PTR_ERR(gpio_hw_reset);
+		printe("Failed to get reset gpio: %d.\n", ret);
+		return ret;
+	}
 
 	// Configure PI based MClk, if selected
 	if (cfg_osc)
 	{
+		printn("Configuring GPIOs.\n");
+
+		// Map GPIO function registers
+		s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
+
 		s_pClkRegisters = (struct ClkRegisters *)ioremap(CLK_BASE, sizeof(struct ClkRegisters));
 		if (!AdagioConnect_MClk_init(AdagioMClkGpioPin))
 		{
@@ -402,23 +446,10 @@ static int AdagioConnect_md_probe(struct platform_device *pdev)
 	}
 
 	// Reset the WM8770 board
-	AdagioConnect_reset();
+	AdagioConnect_hw_reset();
 
 // ALSA config
 	snd_rpi_adagioconnect.dev = &pdev->dev;
-
-	if (pdev->dev.of_node) {
-		struct device_node *i2s_node;
-		struct snd_soc_dai_link *dai = &snd_adagioconnect_dai[0];
-		i2s_node = of_parse_phandle(pdev->dev.of_node, "i2s-controller", 0);
-
-		if (i2s_node) {
-			dai->cpu_dai_name = NULL;
-			dai->cpu_of_node = i2s_node;
-			dai->platform_name = NULL;
-			dai->platform_of_node = i2s_node;
-		}
-	}
 
 	ret = snd_soc_register_card(&snd_rpi_adagioconnect);
 	if (ret && ret != -EPROBE_DEFER) {

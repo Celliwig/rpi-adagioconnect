@@ -2,7 +2,7 @@
 /dts-v1/;
 /plugin/;
 #include <dt-bindings/pinctrl/bcm2835.h>
-//#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/gpio.h>
 
 / {
 	compatible = "brcm,bcm2835", "brcm,bcm2708", "brcm,bcm2709";
@@ -19,6 +19,9 @@
 		__overlay__ {
 			compatible = "rpi-adagioconnect";
 			status = "okay";
+
+			mute-gpios = <&gpio 22 GPIO_ACTIVE_LOW>;
+			reset-gpios = <&gpio 5 GPIO_ACTIVE_LOW>;
 		};
 	};
 
