@@ -8,12 +8,14 @@ I had a Crestron Adagio AAS-2 with a broken motherboard, as the sound board was 
 Currently this driver is output only. While the board provides an ADC, it currently is not connected in my setup, so hasn't been included in the driver.
 
 ### Sound Board
-The required I2S and SPI lines were traced from the codec to the IDC headers without problem. However the board also includes a preamp and this has muting. Muting is controlled by an optocoupler (U10), the LED anode of which is connected through a resistor (R72) to CN23 (14). However, the cathode of the diode is connected to U11, and I could not find a means of controlling U11 so that the cathode would be pulled low (not helped by the fact I'm not sure what that component actually is!). R71 is connected to both U11, and CN22 (22), however it didn't seem to have any affect on the circuit when applying 0V, or 3.3V to that pin. In the end I removed U11, and hooked the optocoupler led cathode directly to ground.
+The required I2S and SPI lines were traced from the codec to the IDC headers without problem. However the board also includes a preamp and this has muting. Muting is controlled by an optocoupler (U10), the LED anode of which is connected through a resistor (R72) to CN23 (14). However, the cathode of the diode is connected to U11, and I could not find a means of controlling U11 so that the cathode would be pulled low (not helped by the fact I'm not sure what that component actually is!). R71 is connected to both U11, and CN22 (22), however it didn't seem to have any affect on the circuit when applying 0V, or 3.3V to that pin. In the end I removed U11, and hooked the optocoupler led cathode directly to ground (see pics directory).
 
 The board requires +/- 12V, the 5V line routed to the board in the original configuration is not connected. All required voltages are actually derived with onboard regulators. 
 
+It might be worth noting that I ended up replacing a number of electrolytic caps on the board as they were starting to bulge at the top. This is the likely reason that the motherboard failed as most of the caps were also bulging. See https://en.wikipedia.org/wiki/Capacitor_plague for a probable cause for the failed capacitors.
+
 ### Hookup
-See Adagio Sound Board Pinout.ods for the Adagio sound board pinout. Now for the usual caveat. THIS HAS BEEN DERIVED FROM MY OWN EXPEREINCES, I HAVE SEEN VARIATIONS OF THE BOARD WHICH ARE AT LEAST PHYSICALLY DIFFERENT (COULD BE ELECTRONICALLY THE SAME, HAVEN'T HAD A CHANCE TO CHECK YET), WHICH CARRY THE SAME BOARD NUMBER (WHICH IS WEIRD). SO CHECK THIS YOURSELF, AT LEAST THE VOLTAGE IN +/- 12V. DON'T BLAME ME IF YOU FRY THE SOUND BOARD, THE PI, YOURSELF, THE WORLD (YOU GET THE IDEA). 
+See Adagio Sound Board Pinout.ods for the Adagio sound board pinout. Now for the usual caveat. <b>THIS HAS BEEN DERIVED FROM MY OWN EXPEREINCES, I HAVE SEEN VARIATIONS OF THE BOARD WHICH ARE AT LEAST PHYSICALLY DIFFERENT (COULD BE ELECTRONICALLY THE SAME, HAVEN'T HAD A CHANCE TO CHECK YET), WHICH CARRY THE SAME BOARD NUMBER (WHICH IS WEIRD). SO CHECK THIS YOURSELF, AT LEAST THE VOLTAGE IN +/- 12V. DON'T BLAME ME IF YOU FRY THE SOUND BOARD, THE PI, YOURSELF, THE WORLD (YOU GET THE IDEA)</b>. 
 
 The board was hooked up as specified below, this includes both GPIO and header pin numbering:
 
