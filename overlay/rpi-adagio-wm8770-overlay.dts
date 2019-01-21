@@ -1,0 +1,53 @@
+// Definitions for the Cirrus Logic Audio Card
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/pinctrl/bcm2835.h>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	compatible = "brcm,bcm2835", "brcm,bcm2708", "brcm,bcm2709";
+
+	fragment@0 {
+		target = <&i2s>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&sound>;
+		__overlay__ {
+			compatible = "rpi-adagioconnect";
+			status = "okay";
+
+			mute-gpios = <&gpio 22 GPIO_ACTIVE_LOW>;
+			reset-gpios = <&gpio 5 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	fragment@2 {
+		target = <&spi0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			spidev@0{
+				status = "disabled";
+			};
+
+			spidev@1{
+				status = "disabled";
+			};
+
+			wm8770@0{
+				compatible = "wm8770";
+				reg = <0>;			/* CE0 */
+
+				spi-max-frequency = <500000>;
+
+				status = "okay";
+			};
+		};
+	};
+};
