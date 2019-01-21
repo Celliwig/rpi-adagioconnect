@@ -79,9 +79,30 @@ struct ClkRegisters
 
 static const int AdagioMClkGpioPin = 4;			// The GPIO pin to configure as a clock source for WM8770 MCLK
 static const int AdagioMClkSrc = CLK_CTL_SRC_PLLC;
-static const int AdagioMClkDivI = 81;
-static const int AdagioMClkDivF = 1557;
-static const int AdagioMClkMASH = 1;
+
+//// 12.288 MHz for 48 kHz playback (256fs)
+//static const int AdagioMClkDivI = 81;
+//static const int AdagioMClkDivF = 1557;
+//static const int AdagioMClkMASH = 1;
+
+//// 11.2896 MHz for 44.1 kHz playback (256fs)
+//static const int AdagioMClkDivI = 88;
+//static const int AdagioMClkDivF = 2363;
+//static const int AdagioMClkMASH = 1;
+
+//// 16.9340 MHz for 44.1 kHz playback (384fs)
+//// Actual (Approx) 16.949 MHz, BClk 4.237 MHz, giving 96 BClk per frame
+//static const int AdagioMClkDivI = 59;
+//static const int AdagioMClkDivF = 2048;
+//static const int AdagioMClkMASH = 0;
+
+static int clock_settings[4][7] = {
+//	{ Sample Rate, MClk DivI, MClk DivF, MClk MASH, MClk Freq, FS Ratio, BClk Ratio }
+	{ 32000, 122, 288, 1, 8192000, 256, 64},
+	{ 44100, 88, 2363, 1, 11289600, 256, 64 },
+	{ 48000, 81, 1557, 1, 12288000, 256, 64 },
+	{ 96000, 40, 2826, 1, 24576000, 256, 64 }
+};
 
 /////////////////////////////////////////////////////////////////////////////////////
 // ALSA interfaces
@@ -103,10 +124,12 @@ static struct snd_soc_dai_link snd_adagioconnect_dai[] = {
 		.name		= "AdagioConnect",
 		.stream_name	= "AdagioConnect HiFi",
 		.cpu_dai_name	= "3f203000.i2s",
-		.codec_dai_name	= "snd-soc-dummy-dai",
 		.platform_name	= "3f203000.i2s",
-		.codec_name	= "snd-soc-dummy",
-		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBM_CFM,
+//		.codec_name	= "snd-soc-dummy",
+		.codec_name	= "spi0.0",
+//		.codec_dai_name	= "snd-soc-dummy-dai",
+		.codec_dai_name	= "wm8770-hifi",
+		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS,
 		.ops		= &snd_adagioconnect_dai_ops,
 		.init		= AdagioConnect_dai_init,
 	},

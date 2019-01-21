@@ -306,7 +306,7 @@ static void AdagioConnect_reset_iface(void)
 
 static int AdagioConnect_dai_init(struct snd_soc_pcm_runtime *rtd)
 {
-printd("AdagioConnect_dai_init\n");
+	printd("AdagioConnect_dai_init\n");
 
 	return 0;
 }
@@ -314,12 +314,45 @@ printd("AdagioConnect_dai_init\n");
 static int AdagioConnect_dai_hw_params(struct snd_pcm_substream *substream,
 				       struct snd_pcm_hw_params *params)
 {
-//	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-//	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+//	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret, i;
 
-printd("AdagioConnect_dai_hw_params\n");
+	printd("AdagioConnect_dai_hw_params\n");
 
-//	return snd_soc_dai_set_bclk_ratio(cpu_dai, 32*2);
+	for (i = 0; i < ARRAY_SIZE(clock_settings); ++i)
+	{
+		if (clock_settings[i][0] == params_rate(params))
+		{
+			if (cfg_osc)
+			{
+				AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, clock_settings[i][1], clock_settings[i][2], clock_settings[i][3]);
+			}
+
+			/* Set proto bclk */
+			ret = snd_soc_dai_set_bclk_ratio(cpu_dai,clock_settings[i][6]);
+			if (ret < 0)
+			{
+				printe("Failed to set BCLK ratio %d\n", ret);
+				return ret;
+			}
+
+			/* Set proto sysclk */
+			ret = snd_soc_dai_set_sysclk(codec_dai, 0, clock_settings[i][4], 0);
+			if (ret < 0)
+			{
+				printe("Failed to set SYSCLK: %d\n", ret);
+				return ret;
+			}
+
+			break;
+		}
+	}
+
+	if (i == ARRAY_SIZE(clock_settings)) printe("Failed to setup MCLK.\n ");
+
 	return 0;
 }
 
@@ -334,8 +367,16 @@ printd("AdagioConnect_dai_hw_params\n");
 static int AdagioConnect_md_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	const char *mdl_wm8770 = "wm8770";			// module to load
 
 	printi("Adagio soundcard, Raspberry PI connector.\n");
+
+	ret = request_module(mdl_wm8770);
+	if (ret)
+	{
+		printe("Unable to request module load '%s': %d\n", mdl_wm8770, ret);
+		goto exit;
+	}
 
 // Initial config
 	printn("Configuring GPIOs.\n");
@@ -350,7 +391,8 @@ static int AdagioConnect_md_probe(struct platform_device *pdev)
 		s_pClkRegisters = (struct ClkRegisters *)ioremap(CLK_BASE, sizeof(struct ClkRegisters));
 		if (!AdagioConnect_MClk_init(AdagioMClkGpioPin))
 		{
-			AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, AdagioMClkDivI, AdagioMClkDivF, AdagioMClkMASH);
+			// Default to 44.1 kHz settings
+			AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, clock_settings[1][1], clock_settings[1][2], clock_settings[1][3]);
 		}
 		else
 		{
@@ -384,6 +426,7 @@ static int AdagioConnect_md_probe(struct platform_device *pdev)
 		AdagioConnect_reset_iface();
 	}
 
+exit:
 	return ret;
 }
 
