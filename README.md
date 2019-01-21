@@ -11,7 +11,8 @@ Currently, this module is output only. While the board provides an ADC, it curre
 I believe this should be compatible with a Raspberry Pi 3, but I don't think this will work for the original Raspberry Pi, however I have neither so can't make any further comment.
 
 ### Hookup
-See
+See Adagio Sound Board Pinout.ods for the Adagio sound board pinout.
+
 The board was hooked up as specified below, this includes both GPIO and header pin numbering:
 
 | Function            |                    GPIO            Header
