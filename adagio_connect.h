@@ -87,27 +87,55 @@ static const int AdagioMClkMASH = 1;
 // ALSA interfaces
 /////////////////////////////////////////////////////////////////////////////////////
 
-#define SND_ADAGIOCONNECT_DRIVER	"adagio-codec"
+////////////////////////////////////////
+// DAI
+////////////////////////////////////////
 
-/////////////////////////////////////////////////////////////////////////////////////
-// ALSA driver
-/////////////////////////////////////////////////////////////////////////////////////
+/* machine stream operations */
+static int AdagioConnect_dai_hw_params(struct snd_pcm_substream *substream, struct snd_pcm_hw_params *params);
+static struct snd_soc_ops snd_adagioconnect_dai_ops = {
+	.hw_params = AdagioConnect_dai_hw_params,
+};
+
+static int AdagioConnect_dai_init(struct snd_soc_pcm_runtime *rtd);
+static struct snd_soc_dai_link snd_adagioconnect_dai[] = {
+	{
+		.name		= "AdagioConnect",
+		.stream_name	= "AdagioConnect HiFi",
+		.cpu_dai_name	= "3f203000.i2s",
+		.codec_dai_name	= "snd-soc-dummy-dai",
+		.platform_name	= "3f203000.i2s",
+		.codec_name	= "snd-soc-dummy",
+		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBM_CFM,
+		.ops		= &snd_adagioconnect_dai_ops,
+		.init		= AdagioConnect_dai_init,
+	},
+};
+
+////////////////////////////////////////
+// Driver
+////////////////////////////////////////
+
+static struct snd_soc_card snd_rpi_adagioconnect = {
+	.name           = "snd_adagioconnect",
+	.owner          = THIS_MODULE,
+	.dai_link       = snd_adagioconnect_dai,
+	.num_links      = ARRAY_SIZE(snd_adagioconnect_dai),
+};
 
 static const struct of_device_id adagioconnect_dev_match[] = {
-	{.compatible = SND_ADAGIOCONNECT_DRIVER},
+	{.compatible = "rpi-adagioconnect"},
 	{}
 };
 
-static int AdagioConnect_codec_probe(struct platform_device *pdev);
-static int AdagioConnect_codec_remove(struct platform_device *pdev);
-static struct platform_driver adagioconnect_snd_driver = {
+static int AdagioConnect_md_probe(struct platform_device *pdev);
+static int AdagioConnect_md_remove(struct platform_device *pdev);
+static struct platform_driver adagioconnect_driver = {
 	.driver = {
-		.name = SND_ADAGIOCONNECT_DRIVER,
+		.name = "rpi_adagioconnect",
 		.owner          = THIS_MODULE,
 		.of_match_table = adagioconnect_dev_match,
 	},
-	.probe              = AdagioConnect_codec_probe,
-	.remove             = AdagioConnect_codec_remove,
+	.probe = AdagioConnect_md_probe,
+	.remove = AdagioConnect_md_remove,
 };
-
-static struct platform_device *ac_device = NULL;

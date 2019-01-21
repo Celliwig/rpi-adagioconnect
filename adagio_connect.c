@@ -8,6 +8,7 @@
  *													*
  *	Shouldn't cast pointer returned from ioremap/should use ioread32/iowrite32 for __iomem		*/
 
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -23,6 +24,7 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/control.h>
+#include <sound/jack.h>
 
 #include "adagio_connect.h"
 
@@ -264,29 +266,12 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 }
 
 /////////////////////////////////////////////////////////////////////////
-// Main Module Functions
+// Machine driver
 /////////////////////////////////////////////////////////////////////////
-//////////////////////////////
-// Driver
-//////////////////////////////
 
-static int AdagioConnect_codec_probe(struct platform_device *pdev)
-{
-	printd("Codec Probe.\n");
-
-	return 0;
-}
-
-static int AdagioConnect_codec_remove(struct platform_device *pdev)
-{
-	printd("Codec Remove.\n");
-
-	return 0;
-}
-
-//////////////////////////////
-// Device
-//////////////////////////////
+////////////////////////////////////////
+// Basic device functions
+////////////////////////////////////////
 
 // Pulses the GPIO pin indicated by AdagioResetGpioPin to reset the WM8770 board
 static void AdagioConnect_reset(void)
@@ -299,14 +284,7 @@ static void AdagioConnect_reset(void)
 	SetGPIOOutputValue(AdagioResetGpioPin, true);
 }
 
-static void snd_adagioconnect_unregister_all(void)
-{
-	platform_device_unregister(ac_device);
-	platform_driver_unregister(&adagioconnect_snd_driver);
-//	free_fake_buffer();
-}
-
-static void snd_adagioconnect_reset_iface(void)
+static void AdagioConnect_reset_iface(void)
 {
 	// Disable MClk
 	if (cfg_osc && (s_pClkRegisters != NULL))
@@ -322,14 +300,44 @@ static void snd_adagioconnect_reset_iface(void)
 	iounmap(s_pGpioRegisters);
 }
 
-// Module init
-static int __init AdagioConnect_init(void)
+////////////////////////////////////////
+// DAI
+////////////////////////////////////////
+
+static int AdagioConnect_dai_init(struct snd_soc_pcm_runtime *rtd)
 {
-	int err;
-	struct platform_device *device;
+printd("AdagioConnect_dai_init\n");
+
+	return 0;
+}
+
+static int AdagioConnect_dai_hw_params(struct snd_pcm_substream *substream,
+				       struct snd_pcm_hw_params *params)
+{
+//	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+//	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+
+printd("AdagioConnect_dai_hw_params\n");
+
+//	return snd_soc_dai_set_bclk_ratio(cpu_dai, 32*2);
+	return 0;
+}
+
+////////////////////////////////////////
+// Module interface
+////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// Driver
+//////////////////////////////////////////////////////////////////////////////////////////
+
+static int AdagioConnect_md_probe(struct platform_device *pdev)
+{
+	int ret = 0;
 
 	printi("Adagio soundcard, Raspberry PI connector.\n");
 
+// Initial config
 	printn("Configuring GPIOs.\n");
 	// Map GPIO function registers
 	s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
@@ -354,50 +362,43 @@ static int __init AdagioConnect_init(void)
 	// Reset the WM8770 board
 	AdagioConnect_reset();
 
-	// ALSA Setup
-	err = platform_driver_register(&adagioconnect_snd_driver);
-	if (err < 0) return err;
+// ALSA config
+	snd_rpi_adagioconnect.dev = &pdev->dev;
 
-//	err = alloc_fake_buffer();
-//	if (err < 0) {
-//		platform_driver_unregister(&snd_dummy_driver);
-//		return err;
-//	}
+	if (pdev->dev.of_node) {
+		struct device_node *i2s_node;
+		struct snd_soc_dai_link *dai = &snd_adagioconnect_dai[0];
+		i2s_node = of_parse_phandle(pdev->dev.of_node, "i2s-controller", 0);
 
-	device = platform_device_register_simple(SND_ADAGIOCONNECT_DRIVER, 0, NULL, 0);
-
-	if (!IS_ERR(device)) {
-		if (platform_get_drvdata(device)) {
-			ac_device = device;
-		} else {
-			platform_device_unregister(device);
+		if (i2s_node) {
+			dai->cpu_dai_name = NULL;
+			dai->cpu_of_node = i2s_node;
+			dai->platform_name = NULL;
+			dai->platform_of_node = i2s_node;
 		}
 	}
 
-	if (ac_device == NULL) {
-		printd("Error setuping up device.\n");
-		snd_adagioconnect_unregister_all();
-		snd_adagioconnect_reset_iface();
-		return -ENODEV;
+	ret = snd_soc_register_card(&snd_rpi_adagioconnect);
+	if (ret && ret != -EPROBE_DEFER) {
+		printe("snd_soc_register_card() failed: %d\n", ret);
+		AdagioConnect_reset_iface();
 	}
 
-	return 0;
+	return ret;
 }
 
-// Module remove
-static void __exit AdagioConnect_remove(void)
+static int AdagioConnect_md_remove(struct platform_device *pdev)
 {
-	snd_adagioconnect_unregister_all();
-	snd_adagioconnect_reset_iface();
-
+	int rtn = snd_soc_unregister_card(&snd_rpi_adagioconnect);
+	AdagioConnect_reset_iface();
 	printi("Removed.\n");
+	return rtn;
 }
 
-module_init(AdagioConnect_init)
-module_exit(AdagioConnect_remove)
+module_platform_driver(adagioconnect_driver);
 
-//MODULE_DEVICE_TABLE(of, adagioconnect_dev_match);
-//MODULE_ALIAS("adagio-codec");
+MODULE_DEVICE_TABLE(of, adagioconnect_dev_match);
+MODULE_ALIAS("platform:rpi-adagioconnect");
 MODULE_DESCRIPTION("Adagio WM8770 soundcard driver");
 MODULE_AUTHOR("C Burgoyne");
 MODULE_LICENSE("GPL");
