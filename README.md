@@ -15,7 +15,7 @@ The board requires +/- 12V, the 5V line routed to the board in the original conf
 It might be worth noting that I ended up replacing a number of electrolytic caps on the board as they were starting to bulge at the top. This is the likely reason that the motherboard failed as most of the caps were also bulging. See https://en.wikipedia.org/wiki/Capacitor_plague for a probable cause for the failed capacitors.
 
 ### Hookup
-See Adagio Sound Board Pinout.ods for the Adagio sound board pinout. Now for the usual caveat. <b>THIS HAS BEEN DERIVED FROM MY OWN EXPERIENCES, I HAVE SEEN VARIATIONS OF THE BOARD WHICH ARE AT LEAST PHYSICALLY DIFFERENT (COULD BE ELECTRONICALLY THE SAME, HAVEN'T HAD A CHANCE TO CHECK YET), WHICH CARRY THE SAME BOARD NUMBER (WHICH IS WEIRD). SO CHECK THIS YOURSELF, AT LEAST THE VOLTAGE IN +/- 12V. DON'T BLAME ME IF YOU FRY THE SOUND BOARD, THE PI, YOURSELF, THE WORLD (YOU GET THE IDEA)</b>. 
+See docs/Adagio Sound Board Pinout.ods for the Adagio sound board pinout. Now for the usual caveat. <b>THIS HAS BEEN DERIVED FROM MY OWN EXPERIENCES, I HAVE SEEN VARIATIONS OF THE BOARD WHICH ARE AT LEAST PHYSICALLY DIFFERENT (COULD BE ELECTRONICALLY THE SAME, HAVEN'T HAD A CHANCE TO CHECK YET), WHICH CARRY THE SAME BOARD NUMBER (WHICH IS WEIRD). SO CHECK THIS YOURSELF, AT LEAST THE VOLTAGE IN +/- 12V. DON'T BLAME ME IF YOU FRY THE SOUND BOARD, THE PI, YOURSELF, THE WORLD (YOU GET THE IDEA)</b>. 
 
 The board was hooked up as specified below, this includes both GPIO and header pin numbering:
 
