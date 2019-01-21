@@ -1,7 +1,12 @@
 /*      Module to connect a Raspberry PI to the soundcard from an Adagio Server System                  *
  *      Written C. Burgoyne 2018                                                                        *
  *                                                                                                      *
- *      GPIO code derived from https://sysprogs.com/VisualKernel/tutorials/raspberry/leddriver/         */
+ *      GPIO code derived from https://sysprogs.com/VisualKernel/tutorials/raspberry/leddriver/         *
+ *	Clock code hints from http://abyz.me.uk/rpi/pigpio/examples.html (minimal_clk)			*
+ *													*
+ * 	TODO												*
+ *													*
+ *	Shouldn't cast pointer returned from ioremap/should use ioread32/iowrite32 for __iomem		*/
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -17,6 +22,11 @@ MODULE_LICENSE("GPL");
 
 static int debug = 0;
 module_param(debug, int, 0660);
+MODULE_PARM_DESC(debug, "Print additional debugging information.\n");
+
+static bool cfg_osc = false;
+module_param(cfg_osc, bool, 0440);
+MODULE_PARM_DESC(cfg_osc, "Controls whether the module configures GPCLKn as a clock source for the board.\n");
 
 /////////////////////////////////////////////////////////////////////////
 // GPIO Functions
@@ -62,9 +72,198 @@ static void SetGPIOOutputValue(int GPIO, bool outputValue)
 }
 
 /////////////////////////////////////////////////////////////////////////
+// Clock functions
+/////////////////////////////////////////////////////////////////////////
+struct ClkRegisters *s_pClkRegisters;
+
+// Setup the GPIO function registers to configure AdagioMClkGpioPin as a clock
+static int AdagioConnect_MClk_init(int GPIO)
+{
+	uint32_t* clk_reg = NULL;
+	switch (GPIO)
+	{
+		case GPCLK0_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP0CTL;
+			break;
+		case GPCLK1_PIN:
+			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			break;
+		case GPCLK2_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP2CTL;
+			break;
+		default:
+			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			break;
+	}
+
+	if (clk_reg != NULL)
+	{
+		// if clock source already running, stop it
+		if (*clk_reg & CLK_CTL_BUSY)
+		{
+			// Try just stopping it
+			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
+
+			usleep_range(10, 100);
+
+			// If it's still running, just kill it
+			if (*clk_reg & CLK_CTL_BUSY)
+			{
+				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
+				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
+
+				// wait for clock to stop
+				while (*clk_reg & CLK_CTL_BUSY)
+				{
+					usleep_range(10, 100);
+				}
+			}
+		}
+
+		SetGPIOFunction(GPIO, GPIO_ALT0);
+
+		return 0;
+	}
+
+	return -1;
+}
+
+// Disables the configuration of AdagioMClkGpioPin as a clock
+static int AdagioConnect_MClk_remove(int GPIO)
+{
+	uint32_t* clk_reg = NULL;
+	switch (GPIO)
+	{
+		case GPCLK0_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP0CTL;
+			break;
+		case GPCLK1_PIN:
+			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			break;
+		case GPCLK2_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP2CTL;
+			break;
+		default:
+			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			break;
+	}
+
+	if (clk_reg != NULL)
+	{
+		SetGPIOFunction(GPIO, GPIO_IN);
+
+		// if clock source already running, stop it
+		if (*clk_reg & CLK_CTL_BUSY)
+		{
+			// Try just stopping it
+			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
+
+			usleep_range(10, 100);
+
+			// If it's still running, just kill it
+			if (*clk_reg & CLK_CTL_BUSY)
+			{
+				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
+				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
+
+				// wait for clock to stop
+				while (*clk_reg & CLK_CTL_BUSY)
+				{
+					usleep_range(10, 100);
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	return -1;
+}
+
+// Setup the actual clock frequency
+static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_divF, int clk_MASH)
+{
+	uint32_t* clk_reg = NULL;
+	uint32_t* clk_div = NULL;
+	switch (GPIO)
+	{
+		case GPCLK0_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP0CTL;
+			clk_div = &s_pClkRegisters->CM_GP0DIV;
+			break;
+		case GPCLK1_PIN:
+			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			break;
+		case GPCLK2_PIN:
+			clk_reg = &s_pClkRegisters->CM_GP2CTL;
+			clk_div = &s_pClkRegisters->CM_GP2DIV;
+			break;
+		default:
+			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			break;
+	}
+
+	if ((clk_reg != NULL) && (clk_div != NULL))
+	{
+		if ((clk_src < 0) || (clk_src > 7 ))
+		{
+			printk("AdagioConnect: clock source selection incorrect.\n");
+			return -1;
+		}
+		if ((clk_divI   < 2) || (clk_divI   > 4095))
+		{
+			printk("AdagioConnect: divI value (%d) incorrect.\n", clk_divI);
+			return -1;
+		}
+		if ((clk_divF   < 0) || (clk_divF   > 4095))
+		{
+			printk("AdagioConnect: divF value (%d) incorrect.\n", clk_divF);
+			return -1;
+		}
+		if ((clk_MASH   < 0) || (clk_MASH   > 3))
+		{
+			printk("AdagioConnect: MASH value (%d) incorrect.\n", clk_MASH);
+			return -1;
+		}
+
+		// if clock source already running, stop it
+		if (*clk_reg & CLK_CTL_BUSY)
+		{
+			// Try just stopping it
+			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
+
+			usleep_range(10, 100);
+
+			// If it's still running, just kill it
+			if (*clk_reg & CLK_CTL_BUSY)
+			{
+				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
+				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
+
+				// wait for clock to stop
+				while (*clk_reg & CLK_CTL_BUSY)
+				{
+					usleep_range(10, 100);
+				}
+			}
+		}
+
+		*clk_div = (CLK_CTL_PASSWD | CLK_DIV_DIVI(clk_divI) | CLK_DIV_DIVF(clk_divF));
+		usleep_range(10, 20);
+		*clk_reg = (CLK_CTL_PASSWD | CLK_CTL_MASH(clk_MASH) | CLK_CTL_SRC(clk_src));
+		usleep_range(10, 20);
+		*clk_reg = (CLK_CTL_PASSWD | CLK_CTL_ENAB);
+
+		return 0;
+	}
+
+	return -1;
+}
+
+/////////////////////////////////////////////////////////////////////////
 // Main Module Functions
 /////////////////////////////////////////////////////////////////////////
-// Pulses the GPIO pin indicated by AdagioResetGpioPin to reset the WM9770 board
+// Pulses the GPIO pin indicated by AdagioResetGpioPin to reset the WM8770 board
 static void AdagioConnect_reset(void)
 {
 	if (debug > 0) printk("AdagioConnect: resetting board.\n");
@@ -84,10 +283,18 @@ static int __init AdagioConnect_init(void)
 	// Map GPIO function registers
 	s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
 
-	// Setup GPIO pin connected to reset pin of WM9770 as output
-	SetGPIOFunction(AdagioResetGpioPin, 0b001);  	//Configure the pin as output
+	// Setup GPIO pin connected to reset pin of WM8770 as output
+	SetGPIOFunction(AdagioResetGpioPin, GPIO_OUT);  	//Configure the pin as output
 
-	// Reset the WM9770 board
+	if (cfg_osc)
+	{
+		if (debug > 0) printk("AdagioConnect: configuring GPCLK on pin %d as WM8770 MClk.\n", AdagioMClkGpioPin);
+		s_pClkRegisters = (struct ClkRegisters *)ioremap(CLK_BASE, sizeof(struct ClkRegisters));
+		AdagioConnect_MClk_init(AdagioMClkGpioPin);
+		AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, AdagioMClkDivI, AdagioMClkDivF, AdagioMClkMASH);
+	}
+
+	// Reset the WM8770 board
 	AdagioConnect_reset();
 
 	return 0;
@@ -96,8 +303,15 @@ static int __init AdagioConnect_init(void)
 // Module remove
 static void __exit AdagioConnect_exit(void)
 {
-	// Reset GPIO pin connected to reset pin of WM9770 as input
-	SetGPIOFunction(AdagioResetGpioPin, 0);  	//Configure the pin as input
+	if (cfg_osc)
+	{
+		if (debug > 0) printk("AdagioConnect: removing GPCLK.\n");
+		AdagioConnect_MClk_remove(AdagioMClkGpioPin);
+		iounmap(s_pClkRegisters);
+	}
+
+	// Reset GPIO pin connected to reset pin of WM8770 as input
+	SetGPIOFunction(AdagioResetGpioPin, GPIO_IN);  	//Configure the pin as input
 
 	// Unmap GPIO function registers
 	iounmap(s_pGpioRegisters);
