@@ -40,6 +40,7 @@ static const int AdagioResetHoldPeriod = 50;	// The time (in ns) to hold ResetB 
 #define CLK_CTL_PASSWD  (0x5A<<24)
 
 #define CLK_CTL_MASH(x)((x)<<9)
+#define CLK_CTL_FLIP    (1 <<8)
 #define CLK_CTL_BUSY    (1 <<7)
 #define CLK_CTL_KILL    (1 <<5)
 #define CLK_CTL_ENAB    (1 <<4)

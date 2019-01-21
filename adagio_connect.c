@@ -28,6 +28,10 @@ static bool cfg_osc = false;
 module_param(cfg_osc, bool, 0440);
 MODULE_PARM_DESC(cfg_osc, "Controls whether the module configures GPCLKn as a clock source for the board.\n");
 
+static bool cfg_osc_stop_existing = false;
+module_param(cfg_osc_stop_existing, bool, 0440);
+MODULE_PARM_DESC(cfg_osc_stop_existing, "Stops an existing GPCLK which is currently running (Dangerous, suggests it's already in use by something else).\n");
+
 /////////////////////////////////////////////////////////////////////////
 // GPIO Functions
 /////////////////////////////////////////////////////////////////////////
@@ -76,10 +80,41 @@ static void SetGPIOOutputValue(int GPIO, bool outputValue)
 /////////////////////////////////////////////////////////////////////////
 struct ClkRegisters *s_pClkRegisters;
 
+static void StopClockSource(uint32_t* clk_reg)
+{
+	if (clk_reg != NULL)
+	{
+		// if clock source already running, stop it
+		if (*clk_reg & CLK_CTL_BUSY)
+		{
+			// Try just stopping it
+			*clk_reg = (*clk_reg & ~CLK_CTL_ENAB) | CLK_CTL_PASSWD;
+
+			usleep_range(10, 100);
+
+			// If it's still running, just kill it
+			if (*clk_reg & CLK_CTL_BUSY)
+			{
+				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
+				*clk_reg = *clk_reg | CLK_CTL_PASSWD | CLK_CTL_KILL;
+
+				// wait for clock to stop
+				while (*clk_reg & CLK_CTL_BUSY)
+				{
+					usleep_range(10, 100);
+				}
+			}
+		}
+	}
+}
+
 // Setup the GPIO function registers to configure AdagioMClkGpioPin as a clock
 static int AdagioConnect_MClk_init(int GPIO)
 {
 	uint32_t* clk_reg = NULL;
+
+	if (debug > 0) printk("AdagioConnect: configuring GPCLK on pin %d as WM8770 MClk.\n", AdagioMClkGpioPin);
+
 	switch (GPIO)
 	{
 		case GPCLK0_PIN:
@@ -98,28 +133,24 @@ static int AdagioConnect_MClk_init(int GPIO)
 
 	if (clk_reg != NULL)
 	{
-		// if clock source already running, stop it
+		// Check if the clock is running
 		if (*clk_reg & CLK_CTL_BUSY)
 		{
-			// Try just stopping it
-			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
+			printk("AdagioConnect: There is a clock already running on GPIO %d (status reg: %d).\n", GPIO, *clk_reg);
 
-			usleep_range(10, 100);
-
-			// If it's still running, just kill it
-			if (*clk_reg & CLK_CTL_BUSY)
+			if (cfg_osc_stop_existing)
 			{
-				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
-				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
-
-				// wait for clock to stop
-				while (*clk_reg & CLK_CTL_BUSY)
-				{
-					usleep_range(10, 100);
-				}
+				printk("AdagioConnect: Forcing stop of clock source.\n");
+				StopClockSource(clk_reg);
+			}
+			else
+			{
+				printk("AdagioConnect: Not changing clock source.\n");
+				return -1;
 			}
 		}
 
+		// Change GPIO pin to Alt0 (GPCLK)
 		SetGPIOFunction(GPIO, GPIO_ALT0);
 
 		return 0;
@@ -132,6 +163,9 @@ static int AdagioConnect_MClk_init(int GPIO)
 static int AdagioConnect_MClk_remove(int GPIO)
 {
 	uint32_t* clk_reg = NULL;
+
+	if (debug > 0) printk("AdagioConnect: removing GPCLK.\n");
+
 	switch (GPIO)
 	{
 		case GPCLK0_PIN:
@@ -150,29 +184,11 @@ static int AdagioConnect_MClk_remove(int GPIO)
 
 	if (clk_reg != NULL)
 	{
+		// Change GPIO pin back to an input
 		SetGPIOFunction(GPIO, GPIO_IN);
 
 		// if clock source already running, stop it
-		if (*clk_reg & CLK_CTL_BUSY)
-		{
-			// Try just stopping it
-			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
-
-			usleep_range(10, 100);
-
-			// If it's still running, just kill it
-			if (*clk_reg & CLK_CTL_BUSY)
-			{
-				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
-				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
-
-				// wait for clock to stop
-				while (*clk_reg & CLK_CTL_BUSY)
-				{
-					usleep_range(10, 100);
-				}
-			}
-		}
+		StopClockSource(clk_reg);
 
 		return 0;
 	}
@@ -227,32 +243,17 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 		}
 
 		// if clock source already running, stop it
-		if (*clk_reg & CLK_CTL_BUSY)
-		{
-			// Try just stopping it
-			*clk_reg = CLK_CTL_PASSWD | CLK_CTL_ENAB;
+		StopClockSource(clk_reg);
 
-			usleep_range(10, 100);
-
-			// If it's still running, just kill it
-			if (*clk_reg & CLK_CTL_BUSY)
-			{
-				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
-				*clk_reg = CLK_CTL_PASSWD | CLK_CTL_KILL;
-
-				// wait for clock to stop
-				while (*clk_reg & CLK_CTL_BUSY)
-				{
-					usleep_range(10, 100);
-				}
-			}
-		}
+		if (debug > 0) printk("AdagioConnect: Clock source - %d.\n", clk_src);
+		if (debug > 0) printk("AdagioConnect: Clock DIV_I - %d.\n", clk_divI);
+		if (debug > 0) printk("AdagioConnect: Clock DIV_F - %d.\n", clk_divF);
+		if (debug > 0) printk("AdagioConnect: Clock MASH - %d.\n", clk_MASH);
 
 		*clk_div = (CLK_CTL_PASSWD | CLK_DIV_DIVI(clk_divI) | CLK_DIV_DIVF(clk_divF));
-		usleep_range(10, 20);
-		*clk_reg = (CLK_CTL_PASSWD | CLK_CTL_MASH(clk_MASH) | CLK_CTL_SRC(clk_src));
-		usleep_range(10, 20);
-		*clk_reg = (CLK_CTL_PASSWD | CLK_CTL_ENAB);
+		usleep_range(10, 100);
+		*clk_reg = (CLK_CTL_PASSWD | CLK_CTL_ENAB | CLK_CTL_MASH(clk_MASH) | CLK_CTL_SRC(clk_src));
+		usleep_range(10, 100);
 
 		return 0;
 	}
@@ -282,16 +283,22 @@ static int __init AdagioConnect_init(void)
 	if (debug > 0) printk("AdagioConnect: configuring GPIOs.\n");
 	// Map GPIO function registers
 	s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
-
 	// Setup GPIO pin connected to reset pin of WM8770 as output
 	SetGPIOFunction(AdagioResetGpioPin, GPIO_OUT);  	//Configure the pin as output
 
+	// Configure PI based MClk, if selected
 	if (cfg_osc)
 	{
-		if (debug > 0) printk("AdagioConnect: configuring GPCLK on pin %d as WM8770 MClk.\n", AdagioMClkGpioPin);
 		s_pClkRegisters = (struct ClkRegisters *)ioremap(CLK_BASE, sizeof(struct ClkRegisters));
-		AdagioConnect_MClk_init(AdagioMClkGpioPin);
-		AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, AdagioMClkDivI, AdagioMClkDivF, AdagioMClkMASH);
+		if (!AdagioConnect_MClk_init(AdagioMClkGpioPin))
+		{
+			AdagioConnect_MClk_cfg(AdagioMClkGpioPin, AdagioMClkSrc, AdagioMClkDivI, AdagioMClkDivF, AdagioMClkMASH);
+		}
+		else
+		{
+			iounmap(s_pClkRegisters);
+			s_pClkRegisters = NULL;
+		}
 	}
 
 	// Reset the WM8770 board
@@ -303,9 +310,8 @@ static int __init AdagioConnect_init(void)
 // Module remove
 static void __exit AdagioConnect_exit(void)
 {
-	if (cfg_osc)
+	if (cfg_osc && (s_pClkRegisters != NULL))
 	{
-		if (debug > 0) printk("AdagioConnect: removing GPCLK.\n");
 		AdagioConnect_MClk_remove(AdagioMClkGpioPin);
 		iounmap(s_pClkRegisters);
 	}
