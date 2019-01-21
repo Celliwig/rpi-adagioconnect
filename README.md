@@ -22,6 +22,9 @@ The board was hooked up as specified below, this includes both GPIO and header p
 | I2S PCM FS         |     19     |     35     |     CN22 (2)      |
 | I2S PCM DIN        |     20     |     38     |        N/C        |
 | I2S PCM DOUT       |     21     |     40     | CN22 (8,10,12,14) |
+| SPI MOSI           |     10     |     19     |     CN22 (24)     |
+| SPI SCL            |     11     |     23     |     CN22 (25)     |
+| SPI CE0            |      8     |     24     |     CN22 (23)     |
 | Codec Reset        |      5     |     29     |     CN22 (26)     |
 | Board Amp Mute     |     22     |     15     |     CN23 (14)     |
 
