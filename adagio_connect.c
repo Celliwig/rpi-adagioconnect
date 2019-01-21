@@ -10,19 +10,21 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <asm/io.h>
 #include <linux/timer.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/mm.h>
 #include <linux/delay.h>
+
+#include <sound/core.h>
+#include <sound/pcm.h>
+#include <sound/pcm_params.h>
+#include <sound/soc.h>
+#include <sound/control.h>
+
 #include "adagio_connect.h"
-
-MODULE_LICENSE("GPL");
-
-static int debug = 0;
-module_param(debug, int, 0660);
-MODULE_PARM_DESC(debug, "Print additional debugging information.\n");
 
 static bool cfg_osc = false;
 module_param(cfg_osc, bool, 0440);
@@ -45,7 +47,7 @@ static void SetGPIOFunction(int GPIO, int functionCode)
 	unsigned oldValue = s_pGpioRegisters->GPFSEL[registerIndex];
 	unsigned mask = 0b111 << bit;
 
-	if (debug > 0) printk("AdagioConnect: changing function of GPIO%d from %x to %x\n", GPIO, (oldValue >> bit) & 0b111, functionCode);
+	printd("Changing function of GPIO%d from %x to %x\n", GPIO, (oldValue >> bit) & 0b111, functionCode);
 	s_pGpioRegisters->GPFSEL[registerIndex] = (oldValue & ~mask) | ((functionCode << bit) & mask);
 }
 
@@ -64,12 +66,12 @@ static void SetGPIOOutputValue(int GPIO, bool outputValue)
 	{
 		if (outputValue)
 		{
-			if (debug > 0) printk("AdagioConnect: GPIO%d: 0 -> 1\n", GPIO);
+			printd("GPIO%d: 0 -> 1\n", GPIO);
 			s_pGpioRegisters->GPSET[GPIO / 32] = (1 << (GPIO % 32));
 		}
 		else
 		{
-			if (debug > 0) printk("AdagioConnect: GPIO%d: 1 -> 0\n", GPIO);
+			printd("GPIO%d: 1 -> 0\n", GPIO);
 			s_pGpioRegisters->GPCLR[GPIO / 32] = (1 << (GPIO % 32));
 		}
 	}
@@ -95,7 +97,7 @@ static void StopClockSource(uint32_t* clk_reg)
 			// If it's still running, just kill it
 			if (*clk_reg & CLK_CTL_BUSY)
 			{
-				if (debug > 0) printk("AdagioConnect: killing clock source.\n");
+				printe("Killing clock source.\n");
 				*clk_reg = *clk_reg | CLK_CTL_PASSWD | CLK_CTL_KILL;
 
 				// wait for clock to stop
@@ -113,7 +115,7 @@ static int AdagioConnect_MClk_init(int GPIO)
 {
 	uint32_t* clk_reg = NULL;
 
-	if (debug > 0) printk("AdagioConnect: configuring GPCLK on pin %d as WM8770 MClk.\n", AdagioMClkGpioPin);
+	printn("Configuring GPCLK on pin %d as WM8770 MClk.\n", AdagioMClkGpioPin);
 
 	switch (GPIO)
 	{
@@ -121,13 +123,13 @@ static int AdagioConnect_MClk_init(int GPIO)
 			clk_reg = &s_pClkRegisters->CM_GP0CTL;
 			break;
 		case GPCLK1_PIN:
-			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			printe("You shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
 			break;
 		case GPCLK2_PIN:
 			clk_reg = &s_pClkRegisters->CM_GP2CTL;
 			break;
 		default:
-			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			printe("GPIO pin %d is not available as a clock source.\n", GPIO);
 			break;
 	}
 
@@ -136,16 +138,16 @@ static int AdagioConnect_MClk_init(int GPIO)
 		// Check if the clock is running
 		if (*clk_reg & CLK_CTL_BUSY)
 		{
-			printk("AdagioConnect: There is a clock already running on GPIO %d (status reg: %d).\n", GPIO, *clk_reg);
+			printe("There is a clock already running on GPIO %d (status reg: %d).\n", GPIO, *clk_reg);
 
 			if (cfg_osc_stop_existing)
 			{
-				printk("AdagioConnect: Forcing stop of clock source.\n");
+				printe("Forcing stop of clock source.\n");
 				StopClockSource(clk_reg);
 			}
 			else
 			{
-				printk("AdagioConnect: Not changing clock source.\n");
+				printe("Not changing clock source.\n");
 				return -1;
 			}
 		}
@@ -164,7 +166,7 @@ static int AdagioConnect_MClk_remove(int GPIO)
 {
 	uint32_t* clk_reg = NULL;
 
-	if (debug > 0) printk("AdagioConnect: removing GPCLK.\n");
+	printn("Removing GPCLK.\n");
 
 	switch (GPIO)
 	{
@@ -172,13 +174,13 @@ static int AdagioConnect_MClk_remove(int GPIO)
 			clk_reg = &s_pClkRegisters->CM_GP0CTL;
 			break;
 		case GPCLK1_PIN:
-			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			printe("You shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
 			break;
 		case GPCLK2_PIN:
 			clk_reg = &s_pClkRegisters->CM_GP2CTL;
 			break;
 		default:
-			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			printe("GPIO pin %d is not available as a clock source.\n", GPIO);
 			break;
 	}
 
@@ -208,14 +210,14 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 			clk_div = &s_pClkRegisters->CM_GP0DIV;
 			break;
 		case GPCLK1_PIN:
-			printk("AdagioConnect: you shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
+			printe("You shouldn't use GPCLK2 as a clock source, it's used by the system.\n");
 			break;
 		case GPCLK2_PIN:
 			clk_reg = &s_pClkRegisters->CM_GP2CTL;
 			clk_div = &s_pClkRegisters->CM_GP2DIV;
 			break;
 		default:
-			printk("AdagioConnect: GPIO pin %d is not available as a clock source.\n", GPIO);
+			printe("GPIO pin %d is not available as a clock source.\n", GPIO);
 			break;
 	}
 
@@ -223,32 +225,32 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 	{
 		if ((clk_src < 0) || (clk_src > 7 ))
 		{
-			printk("AdagioConnect: clock source selection incorrect.\n");
+			printe("Clock source selection incorrect.\n");
 			return -1;
 		}
 		if ((clk_divI   < 2) || (clk_divI   > 4095))
 		{
-			printk("AdagioConnect: divI value (%d) incorrect.\n", clk_divI);
+			printe("DivI value (%d) incorrect.\n", clk_divI);
 			return -1;
 		}
 		if ((clk_divF   < 0) || (clk_divF   > 4095))
 		{
-			printk("AdagioConnect: divF value (%d) incorrect.\n", clk_divF);
+			printe("DivF value (%d) incorrect.\n", clk_divF);
 			return -1;
 		}
 		if ((clk_MASH   < 0) || (clk_MASH   > 3))
 		{
-			printk("AdagioConnect: MASH value (%d) incorrect.\n", clk_MASH);
+			printe("MASH value (%d) incorrect.\n", clk_MASH);
 			return -1;
 		}
 
 		// if clock source already running, stop it
 		StopClockSource(clk_reg);
 
-		if (debug > 0) printk("AdagioConnect: Clock source - %d.\n", clk_src);
-		if (debug > 0) printk("AdagioConnect: Clock DIV_I - %d.\n", clk_divI);
-		if (debug > 0) printk("AdagioConnect: Clock DIV_F - %d.\n", clk_divF);
-		if (debug > 0) printk("AdagioConnect: Clock MASH - %d.\n", clk_MASH);
+		printd("Clock source - %d.\n", clk_src);
+		printd("Clock DIV_I - %d.\n", clk_divI);
+		printd("Clock DIV_F - %d.\n", clk_divF);
+		printd("Clock MASH - %d.\n", clk_MASH);
 
 		*clk_div = (CLK_CTL_PASSWD | CLK_DIV_DIVI(clk_divI) | CLK_DIV_DIVF(clk_divF));
 		usleep_range(10, 100);
@@ -264,10 +266,32 @@ static int AdagioConnect_MClk_cfg(int GPIO, int clk_src, int clk_divI, int clk_d
 /////////////////////////////////////////////////////////////////////////
 // Main Module Functions
 /////////////////////////////////////////////////////////////////////////
+//////////////////////////////
+// Driver
+//////////////////////////////
+
+static int AdagioConnect_codec_probe(struct platform_device *pdev)
+{
+	printd("Codec Probe.\n");
+
+	return 0;
+}
+
+static int AdagioConnect_codec_remove(struct platform_device *pdev)
+{
+	printd("Codec Remove.\n");
+
+	return 0;
+}
+
+//////////////////////////////
+// Device
+//////////////////////////////
+
 // Pulses the GPIO pin indicated by AdagioResetGpioPin to reset the WM8770 board
 static void AdagioConnect_reset(void)
 {
-	if (debug > 0) printk("AdagioConnect: resetting board.\n");
+	printn("Resetting board.\n");
 	// Bring line low
 	SetGPIOOutputValue(AdagioResetGpioPin, false);
 	ndelay(AdagioResetHoldPeriod);			// (20ns CE to ResetB hold time + 20ns ResetB to SPI Clock setup time + 10ns just in case)
@@ -275,12 +299,38 @@ static void AdagioConnect_reset(void)
 	SetGPIOOutputValue(AdagioResetGpioPin, true);
 }
 
+static void snd_adagioconnect_unregister_all(void)
+{
+	platform_device_unregister(ac_device);
+	platform_driver_unregister(&adagioconnect_snd_driver);
+//	free_fake_buffer();
+}
+
+static void snd_adagioconnect_reset_iface(void)
+{
+	// Disable MClk
+	if (cfg_osc && (s_pClkRegisters != NULL))
+	{
+		AdagioConnect_MClk_remove(AdagioMClkGpioPin);
+		iounmap(s_pClkRegisters);
+	}
+
+	// Reset GPIO pin connected to reset pin of WM8770 as input
+	SetGPIOFunction(AdagioResetGpioPin, GPIO_IN);  	//Configure the pin as input
+
+	// Unmap GPIO function registers
+	iounmap(s_pGpioRegisters);
+}
+
 // Module init
 static int __init AdagioConnect_init(void)
 {
-	printk("AdagioConnect: Adagio soundcard, Raspberry PI connector.\n");
+	int err;
+	struct platform_device *device;
 
-	if (debug > 0) printk("AdagioConnect: configuring GPIOs.\n");
+	printi("Adagio soundcard, Raspberry PI connector.\n");
+
+	printn("Configuring GPIOs.\n");
 	// Map GPIO function registers
 	s_pGpioRegisters = (struct GpioRegisters *)ioremap(GPIO_BASE, sizeof(struct GpioRegisters));
 	// Setup GPIO pin connected to reset pin of WM8770 as output
@@ -304,26 +354,50 @@ static int __init AdagioConnect_init(void)
 	// Reset the WM8770 board
 	AdagioConnect_reset();
 
+	// ALSA Setup
+	err = platform_driver_register(&adagioconnect_snd_driver);
+	if (err < 0) return err;
+
+//	err = alloc_fake_buffer();
+//	if (err < 0) {
+//		platform_driver_unregister(&snd_dummy_driver);
+//		return err;
+//	}
+
+	device = platform_device_register_simple(SND_ADAGIOCONNECT_DRIVER, 0, NULL, 0);
+
+	if (!IS_ERR(device)) {
+		if (platform_get_drvdata(device)) {
+			ac_device = device;
+		} else {
+			platform_device_unregister(device);
+		}
+	}
+
+	if (ac_device == NULL) {
+		printd("Error setuping up device.\n");
+		snd_adagioconnect_unregister_all();
+		snd_adagioconnect_reset_iface();
+		return -ENODEV;
+	}
+
 	return 0;
 }
 
 // Module remove
-static void __exit AdagioConnect_exit(void)
+static void __exit AdagioConnect_remove(void)
 {
-	if (cfg_osc && (s_pClkRegisters != NULL))
-	{
-		AdagioConnect_MClk_remove(AdagioMClkGpioPin);
-		iounmap(s_pClkRegisters);
-	}
+	snd_adagioconnect_unregister_all();
+	snd_adagioconnect_reset_iface();
 
-	// Reset GPIO pin connected to reset pin of WM8770 as input
-	SetGPIOFunction(AdagioResetGpioPin, GPIO_IN);  	//Configure the pin as input
-
-	// Unmap GPIO function registers
-	iounmap(s_pGpioRegisters);
-
-	if (debug > 0) printk("AdagioConnect: removed.\n");
+	printi("Removed.\n");
 }
 
-module_init(AdagioConnect_init);
-module_exit(AdagioConnect_exit);
+module_init(AdagioConnect_init)
+module_exit(AdagioConnect_remove)
+
+//MODULE_DEVICE_TABLE(of, adagioconnect_dev_match);
+//MODULE_ALIAS("adagio-codec");
+MODULE_DESCRIPTION("Adagio WM8770 soundcard driver");
+MODULE_AUTHOR("C Burgoyne");
+MODULE_LICENSE("GPL");

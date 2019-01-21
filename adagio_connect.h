@@ -1,3 +1,16 @@
+#define LOG_PREFIX "AdagioConnect: "
+
+#define ADAGIO_DEBUG = 1
+
+#ifdef ADAGIO_DEBUG
+#       define printd(...) pr_alert(LOG_PREFIX __VA_ARGS__)
+#else
+#       define printd(...) do {} while (0)
+#endif
+#define printe(...) pr_err(LOG_PREFIX __VA_ARGS__)
+#define printi(...) pr_info(LOG_PREFIX __VA_ARGS__)
+#define printn(...) pr_notice(LOG_PREFIX __VA_ARGS__)
+
 #define PERIPH_BASE 0x3f000000
 
 /////////////////////////////////////////////////////////////////////////////////////
@@ -69,3 +82,32 @@ static const int AdagioMClkSrc = CLK_CTL_SRC_PLLC;
 static const int AdagioMClkDivI = 81;
 static const int AdagioMClkDivF = 1557;
 static const int AdagioMClkMASH = 1;
+
+/////////////////////////////////////////////////////////////////////////////////////
+// ALSA interfaces
+/////////////////////////////////////////////////////////////////////////////////////
+
+#define SND_ADAGIOCONNECT_DRIVER	"adagio-codec"
+
+/////////////////////////////////////////////////////////////////////////////////////
+// ALSA driver
+/////////////////////////////////////////////////////////////////////////////////////
+
+static const struct of_device_id adagioconnect_dev_match[] = {
+	{.compatible = SND_ADAGIOCONNECT_DRIVER},
+	{}
+};
+
+static int AdagioConnect_codec_probe(struct platform_device *pdev);
+static int AdagioConnect_codec_remove(struct platform_device *pdev);
+static struct platform_driver adagioconnect_snd_driver = {
+	.driver = {
+		.name = SND_ADAGIOCONNECT_DRIVER,
+		.owner          = THIS_MODULE,
+		.of_match_table = adagioconnect_dev_match,
+	},
+	.probe              = AdagioConnect_codec_probe,
+	.remove             = AdagioConnect_codec_remove,
+};
+
+static struct platform_device *ac_device = NULL;
