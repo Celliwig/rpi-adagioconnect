@@ -16,12 +16,12 @@ See Adagio Sound Board Pinout.ods for the Adagio sound board pinout.
 The board was hooked up as specified below, this includes both GPIO and header pin numbering:
 
 
-| Function           |  RPi GPIO  | RPi Header |
-| ------------------:| ----------:| ----------:|
-| I2S PCM Clock      |     18     |     12     |
-| I2S PCM FS         |     19     |     35     |
-| I2S PCM DIN        |     20     |     38     |
-| I2S PCM DOUT       |     21     |     40     |
-| Codec Reset        |      5     |     29     |
-| Board Amp Mute     |     22     |     15     |
+| Function           |  RPi GPIO  | RPi Header |   Adagio board    |
+| ------------------:| ----------:| ----------:| -----------------:|
+| I2S PCM Clock      |     18     |     12     |     CN22 (6)      | 
+| I2S PCM FS         |     19     |     35     |     CN22 (2)      |
+| I2S PCM DIN        |     20     |     38     |        N/C        |
+| I2S PCM DOUT       |     21     |     40     | CN22 (8,10,12,14) |
+| Codec Reset        |      5     |     29     |     CN22 (26)     |
+| Board Amp Mute     |     22     |     15     |     CN23 (14)     |
 
